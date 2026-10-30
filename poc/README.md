@@ -22,32 +22,34 @@ attacker-controlled URL (one click).
 
 | #  | Requirement            | How to get it |
 |----|------------------------|---------------|
-| 1  | NextChat Desktop (.exe/.dmg/.AppImage) | Download **v2.15.8** (latest with desktop binaries) from [GitHub Releases](https://github.com/ChatGPTNextWeb/NextChat/releases/tag/v2.15.8). Alternatively: [nextchat.club/download](https://nextchat.club/download). Any desktop version ≤ 2.16.1 is affected. |
+| 1  | NextChat Desktop (.exe/.dmg/.AppImage) | Download **v2.15.8** from links below. **Do NOT use** nextchat.club — that is the commercial SaaS version with a different UI. |
 | 2  | Python 3               | Pre-installed on macOS/Linux. On Windows: `winget install Python.Python.3.12` or [python.org](https://www.python.org/downloads/) |
 | 3  | This `poc/` folder     | Already in this repository |
 
 > **No compilation, no Rust, no Node.js, no yarn.** The official pre-built
 > binary contains the identical vulnerable `tauri.conf.json`.
 
-### Step 1 — Install NextChat Desktop
+### Step 1 — Download and install NextChat Desktop (open-source Tauri build)
 
-**Windows:**
-```
-NextChat_2.15.8_x64-setup.exe
-```
-Double-click the installer. Default options are fine.
+> **IMPORTANT:** Do NOT use the app from `nextchat.club` — that is the commercial
+> SaaS version with a different UI that does not expose the plugin editor.
+> You need the **open-source Tauri desktop build** from GitHub Releases.
 
-**macOS:**
-```
-NextChat_2.15.8_x64.dmg
-```
-Open the .dmg, drag NextChat to Applications.
+**Direct download links (v2.15.8):**
 
-**Linux:**
-```
-NextChat_2.15.8_amd64.AppImage
-chmod +x NextChat_2.15.8_amd64.AppImage
-```
+| Platform | File | Link |
+|----------|------|------|
+| Windows (exe) | `NextChat_2.15.8_x64-setup.exe` (6.1 MB) | [Download](https://github.com/ChatGPTNextWeb/NextChat/releases/download/v2.15.8/NextChat_2.15.8_x64-setup.exe) |
+| Windows (msi) | `NextChat_2.15.8_x64_en-US.msi` (6.6 MB) | [Download](https://github.com/ChatGPTNextWeb/NextChat/releases/download/v2.15.8/NextChat_2.15.8_x64_en-US.msi) |
+| macOS (universal) | `NextChat_2.15.8_universal.dmg` (13.5 MB) | [Download](https://github.com/ChatGPTNextWeb/NextChat/releases/download/v2.15.8/NextChat_2.15.8_universal.dmg) |
+| Linux (AppImage) | `next-chat_2.15.8_amd64.AppImage` (87.2 MB) | [Download](https://github.com/ChatGPTNextWeb/NextChat/releases/download/v2.15.8/next-chat_2.15.8_amd64.AppImage) |
+| Linux (deb) | `next-chat_2.15.8_amd64.deb` (7.9 MB) | [Download](https://github.com/ChatGPTNextWeb/NextChat/releases/download/v2.15.8/next-chat_2.15.8_amd64.deb) |
+
+**Install:**
+
+- **Windows:** Double-click `NextChat_2.15.8_x64-setup.exe`. Default options are fine.
+- **macOS:** Open `NextChat_2.15.8_universal.dmg`, drag NextChat to Applications.
+- **Linux:** `chmod +x next-chat_2.15.8_amd64.AppImage && ./next-chat_2.15.8_amd64.AppImage`
 
 ### Step 2 — Start the exploit server
 
