@@ -1,20 +1,20 @@
 # NextChat Desktop RCE via Plugin XSS — PoC
 
 **CVE:** Pending assignment
-**CWE:** CWE-79 (Stored/DOM XSS) → CWE-78 (OS Command Execution)
-**CVSS 4.0:** 8.4 High — `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:N/SC:H/SI:H/SA:H`
-**CVSS 3.1:** 9.6 Critical — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H`
-**Affected:** NextChat Desktop (Tauri) ≤ 2.16.1 — Windows, macOS, Linux
+**CWE:** CWE-79 (Stored/DOM XSS) → Clipboard Theft + CORS Bypass
+**CVSS 3.1:** 7.1 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N`
+**Affected:** NextChat Desktop (Tauri) ≤ 2.15.8 — Windows, macOS, Linux
 
 ---
 
 ## Summary
 
 A stored XSS in the plugin editor (`app/components/plugin.tsx:348`) combined
-with a permissive Tauri desktop configuration allows a remote attacker to
-achieve arbitrary file read/write and OS-level code execution on the victim's
-machine. The only user interaction required is loading a plugin from an
-attacker-controlled URL (one click).
+with a permissive Tauri desktop configuration (`withGlobalTauri: true`,
+`csp: null`) allows a remote attacker to steal clipboard contents (passwords,
+API keys, tokens) and make arbitrary HTTP requests from the victim's machine
+(bypassing CORS, reaching internal network). The only user interaction
+required is loading a plugin from an attacker-controlled URL (one click).
 
 ## Reproduction (< 5 minutes, no build required)
 
@@ -89,46 +89,32 @@ Leave this terminal open.
 ### Step 4 — Verify the result
 
 **In the NextChat window:**
-- A **red banner** appears at the top: `[PoC] RCE: Wrote C:\nextchat-poc.txt`
-- The window title changes to `[PWNED] NextChat RCE`
-
-**On the filesystem:**
-
-Windows:
-```
-type C:\nextchat-poc.txt
-```
-
-macOS / Linux:
-```
-cat /tmp/nextchat-poc.txt
-```
-
-Expected contents:
-```
-[PoC] NextChat Desktop RCE via Plugin XSS
-Timestamp: 2024-XX-XXTXX:XX:XXZ
-Platform: Win32
-UserAgent: Mozilla/5.0 ...
-```
+- A **red banner** appears at the top: `[PoC] Clipboard stolen and exfiltrated to attacker server`
+- The window title changes to `[PWNED] NextChat XSS`
 
 **In the exploit server terminal:**
 ```
-  [+] Payload delivered: stage1_rce_file_write.yaml
-      Target: 127.0.0.1
+  ==========================================================
+  [EXFILTRATION] POST from 127.0.0.1
+  Clipboard: <whatever text was on the victim's clipboard>
+  Platform: Win32
+  Timestamp: 2026-10-30T...
+  ==========================================================
 ```
 
-### Optional: Test data exfiltration (Stage 2)
+The victim's **clipboard contents** (passwords, API keys, tokens, etc.) are
+silently read and exfiltrated to the attacker's server — no user interaction
+beyond the initial plugin load.
 
-Stop the server (Ctrl+C) and restart with:
+### Optional: Test with diagnostic payload (Stage 0)
+
+To see detailed information about which Tauri APIs are accessible:
 
 ```
-python3 exploit_server.py --port 8888 --payload stage2
+python3 exploit_server.py --port 8888 --payload stage0
 ```
 
-Repeat steps 3-4. The exploit server now logs the contents of the victim's
-`hosts` file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`)
-under `[EXFILTRATION]`.
+This shows an alert listing the full `__TAURI__` API surface available to the attacker.
 
 ---
 
@@ -160,39 +146,59 @@ dangerouslySetInnerHTML renders the entire YAML including the <img> tag as HTML
 Browser fires onerror → JavaScript executes in Tauri WebView context
     │
     ▼
-window.__TAURI__.fs.writeTextFile() writes arbitrary file to victim's OS
+window.__TAURI__.clipboard.readText() steals clipboard contents
     │
     ▼
-RCE achieved (write to autostart, overwrite binaries, exfiltrate data)
+window.__TAURI__.http.fetch() exfiltrates data to attacker (bypasses CORS)
+    │
+    ▼
+Attacker receives victim's clipboard (passwords, API keys, tokens, etc.)
 ```
 
 ## Payload Stages
 
 | Stage | File | What it does |
 |-------|------|-------------|
-| **1** (default) | `stage1_rce_file_write.yaml` | Writes proof file to `/tmp/nextchat-poc.txt` or `C:\nextchat-poc.txt` |
-| **2** | `stage2_exfiltrate.yaml` | Reads `/etc/hosts` (or Windows hosts), exfiltrates to attacker via Tauri HTTP (bypasses CORS) |
-| **3** | `stage3_persist_linux.yaml` | Writes `.desktop` autostart entry on Linux for login persistence |
+| **0** | `stage0_diagnostic.yaml` | Shows alert with full `__TAURI__` API surface and write/read test results |
+| **1** (default) | `stage1_clipboard_exfil.yaml` | Steals clipboard contents and exfiltrates to attacker server via Tauri HTTP |
+| **1-fs** | `stage1_rce_file_write.yaml` | Attempts filesystem write (blocked by default scope in v2.15.8 binary) |
 
-## Impact
+## Confirmed Impact (tested on v2.15.8 Windows)
 
-| Metric | Rating | Evidence |
-|--------|--------|----------|
-| **Confidentiality** | HIGH | `fs.readTextFile` reads any user-accessible file; `http.fetch` exfiltrates without CORS |
-| **Integrity** | HIGH | `fs.writeTextFile`/`writeBinaryFile` writes anywhere (autostart dirs, binaries, configs) |
-| **Availability** | HIGH | `fs.all: true` enables `removeFile`/`removeDir` — attacker can delete system files |
-| **Scope Change** | YES | Crosses from WebView sandbox into host OS filesystem |
+| # | Attack | Status | Evidence |
+|---|--------|--------|----------|
+| 1 | **Stored XSS** in desktop app | CONFIRMED | `<img onerror>` executes JavaScript in Tauri WebView |
+| 2 | **`__TAURI__` API access** | CONFIRMED | `window.__TAURI__` exposes fs, http, clipboard, dialog, notification, shell |
+| 3 | **Clipboard theft** | CONFIRMED | `clipboard.readText()` silently reads clipboard (passwords, API keys, tokens) |
+| 4 | **HTTP CORS bypass** | CONFIRMED | `http.fetch()` makes arbitrary HTTP requests from victim's machine (bypasses CORS, reaches internal network) |
+| 5 | **Clipboard exfiltration** | CONFIRMED | Stolen clipboard data sent to attacker server via Tauri HTTP |
+| 6 | **Filesystem read/write** | BLOCKED | Default empty scope prevents direct fs operations (defense-in-depth) |
+
+### CVSS Scoring
+
+**CVSS 3.1:** 7.1 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N`
+
+| Metric | Value | Rationale |
+|--------|-------|-----------|
+| Attack Vector | Network | Attacker hosts malicious URL |
+| Attack Complexity | Low | Single click to load plugin |
+| Privileges Required | None | No authentication needed |
+| User Interaction | Required | Victim must load the plugin URL |
+| Scope | Changed | Escapes WebView into OS clipboard and network |
+| Confidentiality | Low | Clipboard contents stolen (single snapshot, not persistent keylogger) |
+| Integrity | Low | Can write to clipboard, make HTTP requests on behalf of victim |
+| Availability | None | No denial of service |
 
 ## Tauri APIs Exposed to Attacker
 
-| API | Config | Capability |
-|-----|--------|------------|
-| `fs` | `all: true`, no scope | Read, write, delete any file |
-| `http` | `all: true`, scope `*` | HTTP to any host (bypasses CORS) |
-| `shell` | `open: true` | Open URLs in default browser |
-| `dialog` | `all: true` | Show native dialogs |
-| `clipboard` | `all: true` | Read/write clipboard |
-| `notification` | `all: true` | Show OS notifications |
+| API | Config | Confirmed | Capability |
+|-----|--------|-----------|------------|
+| `clipboard` | `all: true` | **YES** | Read/write clipboard silently |
+| `http` | `all: true`, scope `http://* https://*` | **YES** | HTTP to any host (bypasses CORS, reaches internal network) |
+| `dialog` | `all: true` | available | Show native save/open/message dialogs (phishing) |
+| `notification` | `all: true` | available | Send fake OS notifications (phishing) |
+| `shell` | `open: true` | available | Open URLs in default browser |
+| `fs` | `all: true`, empty scope | **BLOCKED** | APIs enabled but default scope prevents read/write |
 
 ## Recommended Fixes
 
