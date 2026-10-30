@@ -74,17 +74,17 @@ Leave this terminal open.
 
 ### Step 3 — Trigger the exploit
 
-1. **Open NextChat Desktop**
-2. In the sidebar (left panel), click the **compass/discovery icon** (labeled "Discovery")
+1. **Open NextChat Desktop** (the open-source Tauri build, NOT nextchat.club)
+2. In the sidebar, click **"Discovery"** (compass icon, next to "Mask")
 3. A popup selector appears — click **"Plugin"**
-4. On the Plugins page, click the **"+" (Create)** button at the top
-5. A plugin editor modal opens. In the **"Content"** row, find the text input field
-6. Paste the payload URL:
+4. On the Plugins page, click **"Create"** (top-right)
+5. In the **"Edit Plugin"** modal, find the **"OpenAPI Schema"** row
+6. Paste the payload URL in the text input field:
    ```
    http://<your-ip>:8888/plugin.yaml
    ```
    (Use the URL the exploit server printed, or `http://127.0.0.1:8888/plugin.yaml` if testing locally)
-7. Click the **reload button** (circular arrows icon) next to the input
+7. Click the **"Load From URL"** button next to the input
 
 ### Step 4 — Verify the result
 
