@@ -73,15 +73,16 @@ Leave this terminal open.
 ### Step 3 — Trigger the exploit
 
 1. **Open NextChat Desktop**
-2. Click the **gear icon** (Settings) in the bottom-left
-3. Scroll down to **Plugins** and click it
-4. Click the **"+"** button to create a new plugin
-5. In the **"Load from URL"** input field, paste:
+2. In the sidebar (left panel), click the **compass/discovery icon** (labeled "Discovery")
+3. A popup selector appears — click **"Plugin"**
+4. On the Plugins page, click the **"+" (Create)** button at the top
+5. A plugin editor modal opens. In the **"Content"** row, find the text input field
+6. Paste the payload URL:
    ```
    http://<your-ip>:8888/plugin.yaml
    ```
    (Use the URL the exploit server printed, or `http://127.0.0.1:8888/plugin.yaml` if testing locally)
-6. Click the **reload/load button** (circular arrows icon) next to the input
+7. Click the **reload button** (circular arrows icon) next to the input
 
 ### Step 4 — Verify the result
 
