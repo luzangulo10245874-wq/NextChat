@@ -22,7 +22,7 @@ attacker-controlled URL (one click).
 
 | #  | Requirement            | How to get it |
 |----|------------------------|---------------|
-| 1  | NextChat Desktop (.exe/.dmg/.AppImage) | Download the **official release** from [GitHub Releases](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web/releases). Any version ≤ 2.16.1. |
+| 1  | NextChat Desktop (.exe/.dmg/.AppImage) | Download **v2.15.8** (latest with desktop binaries) from [GitHub Releases](https://github.com/ChatGPTNextWeb/NextChat/releases/tag/v2.15.8). Alternatively: [nextchat.club/download](https://nextchat.club/download). Any desktop version ≤ 2.16.1 is affected. |
 | 2  | Python 3               | Pre-installed on macOS/Linux. On Windows: `winget install Python.Python.3.12` or [python.org](https://www.python.org/downloads/) |
 | 3  | This `poc/` folder     | Already in this repository |
 
@@ -33,20 +33,20 @@ attacker-controlled URL (one click).
 
 **Windows:**
 ```
-NextChat_<version>_x64-setup.exe
+NextChat_2.15.8_x64-setup.exe
 ```
 Double-click the installer. Default options are fine.
 
 **macOS:**
 ```
-NextChat_<version>_x64.dmg
+NextChat_2.15.8_x64.dmg
 ```
 Open the .dmg, drag NextChat to Applications.
 
 **Linux:**
 ```
-NextChat_<version>_amd64.AppImage
-chmod +x NextChat_*.AppImage
+NextChat_2.15.8_amd64.AppImage
+chmod +x NextChat_2.15.8_amd64.AppImage
 ```
 
 ### Step 2 — Start the exploit server
