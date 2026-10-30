@@ -1,9 +1,10 @@
 # NextChat Desktop RCE via Plugin XSS — PoC
 
-**CVE:** Pending assignment  
-**CWE:** CWE-79 (Stored/DOM XSS) → CWE-78 (OS Command Execution)  
-**CVSS 3.1:** 8.6 High — `AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H`  
-**Affected:** NextChat Desktop (Tauri) ≤ 2.16.1 (all platforms: Windows, macOS, Linux)
+**CVE:** Pending assignment
+**CWE:** CWE-79 (Stored/DOM XSS) → CWE-78 (OS Command Execution)
+**CVSS 4.0:** 8.4 High — `CVSS:4.0/AV:N/AC:L/AT:N/PR:N/UI:A/VC:H/VI:H/VA:N/SC:H/SI:H/SA:H`
+**CVSS 3.1:** 9.6 Critical — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:H`
+**Affected:** NextChat Desktop (Tauri) ≤ 2.16.1 — Windows, macOS, Linux
 
 ---
 
@@ -15,188 +16,214 @@ achieve arbitrary file read/write and OS-level code execution on the victim's
 machine. The only user interaction required is loading a plugin from an
 attacker-controlled URL (one click).
 
+## Reproduction (< 5 minutes, no build required)
+
+### What you need
+
+| #  | Requirement            | How to get it |
+|----|------------------------|---------------|
+| 1  | NextChat Desktop (.exe/.dmg/.AppImage) | Download the **official release** from [GitHub Releases](https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web/releases). Any version ≤ 2.16.1. |
+| 2  | Python 3               | Pre-installed on macOS/Linux. On Windows: `winget install Python.Python.3.12` or [python.org](https://www.python.org/downloads/) |
+| 3  | This `poc/` folder     | Already in this repository |
+
+> **No compilation, no Rust, no Node.js, no yarn.** The official pre-built
+> binary contains the identical vulnerable `tauri.conf.json`.
+
+### Step 1 — Install NextChat Desktop
+
+**Windows:**
+```
+NextChat_<version>_x64-setup.exe
+```
+Double-click the installer. Default options are fine.
+
+**macOS:**
+```
+NextChat_<version>_x64.dmg
+```
+Open the .dmg, drag NextChat to Applications.
+
+**Linux:**
+```
+NextChat_<version>_amd64.AppImage
+chmod +x NextChat_*.AppImage
+```
+
+### Step 2 — Start the exploit server
+
+Open a terminal in this `poc/` directory:
+
+```
+python3 exploit_server.py --port 8888
+```
+
+On Windows (if `python3` is not recognized):
+```
+python exploit_server.py --port 8888
+```
+
+The server prints your local IP and the payload URL:
+
+```
+  Plugin URL: http://192.168.1.100:8888/plugin.yaml
+```
+
+Leave this terminal open.
+
+### Step 3 — Trigger the exploit
+
+1. **Open NextChat Desktop**
+2. Click the **gear icon** (Settings) in the bottom-left
+3. Scroll down to **Plugins** and click it
+4. Click the **"+"** button to create a new plugin
+5. In the **"Load from URL"** input field, paste:
+   ```
+   http://<your-ip>:8888/plugin.yaml
+   ```
+   (Use the URL the exploit server printed, or `http://127.0.0.1:8888/plugin.yaml` if testing locally)
+6. Click the **reload/load button** (circular arrows icon) next to the input
+
+### Step 4 — Verify the result
+
+**In the NextChat window:**
+- A **red banner** appears at the top: `[PoC] RCE: Wrote C:\nextchat-poc.txt`
+- The window title changes to `[PWNED] NextChat RCE`
+
+**On the filesystem:**
+
+Windows:
+```
+type C:\nextchat-poc.txt
+```
+
+macOS / Linux:
+```
+cat /tmp/nextchat-poc.txt
+```
+
+Expected contents:
+```
+[PoC] NextChat Desktop RCE via Plugin XSS
+Timestamp: 2024-XX-XXTXX:XX:XXZ
+Platform: Win32
+UserAgent: Mozilla/5.0 ...
+```
+
+**In the exploit server terminal:**
+```
+  [+] Payload delivered: stage1_rce_file_write.yaml
+      Target: 127.0.0.1
+```
+
+### Optional: Test data exfiltration (Stage 2)
+
+Stop the server (Ctrl+C) and restart with:
+
+```
+python3 exploit_server.py --port 8888 --payload stage2
+```
+
+Repeat steps 3-4. The exploit server now logs the contents of the victim's
+`hosts` file (`C:\Windows\System32\drivers\etc\hosts` or `/etc/hosts`)
+under `[EXFILTRATION]`.
+
+---
+
 ## Root Cause
 
 Three conditions combine to form the vulnerability:
 
 | # | Condition | Location | Detail |
 |---|-----------|----------|--------|
-| 1 | **Unsanitized innerHTML** | `app/components/plugin.tsx:348` | `dangerouslySetInnerHTML={{ __html: editingPlugin.content }}` renders raw plugin content without any sanitization (no DOMPurify, no escaping) |
-| 2 | **Unrestricted remote input** | `app/components/plugin.tsx:89-117` | `loadFromUrl()` fetches arbitrary URLs and stores the response text directly into `plugin.content` |
-| 3 | **Permissive Tauri config** | `src-tauri/tauri.conf.json` | `withGlobalTauri: true` + `csp: null` + `fs.all: true` (no scope) |
+| 1 | **Unsanitized innerHTML** | `app/components/plugin.tsx:348` | `dangerouslySetInnerHTML={{ __html: editingPlugin.content }}` renders raw plugin content with zero sanitization |
+| 2 | **Unrestricted remote input** | `app/components/plugin.tsx:89-117` | `loadFromUrl()` fetches arbitrary URLs and stores response text directly into `plugin.content` |
+| 3 | **Permissive Tauri config** | `src-tauri/tauri.conf.json` | `withGlobalTauri: true` (line 8) + `csp: null` (line 94) + `fs.all: true` without scope (line 48-49) |
 
 ## Attack Chain
 
 ```
-Attacker crafts malicious OpenAPI YAML with <img onerror="..."> in a string field
+Attacker hosts malicious OpenAPI YAML with <img onerror="..."> payload
     │
     ▼
-Victim clicks "Load from URL" in NextChat Desktop plugin editor
+Victim pastes URL in NextChat plugin editor → clicks Load
     │
     ▼
-loadFromUrl() fetches YAML, JSON.parse fails, raw text stored as plugin.content
+loadFromUrl() fetches YAML → JSON.parse fails → raw text stored as plugin.content
     │
     ▼
-dangerouslySetInnerHTML renders the YAML text including the <img> tag
+dangerouslySetInnerHTML renders the entire YAML including the <img> tag as HTML
     │
     ▼
-Browser parses <img src=x>, image fails to load, onerror handler executes
+Browser fires onerror → JavaScript executes in Tauri WebView context
     │
     ▼
-JavaScript payload runs in WebView context with window.__TAURI__ available
+window.__TAURI__.fs.writeTextFile() writes arbitrary file to victim's OS
     │
     ▼
-window.__TAURI__.fs.writeTextFile() writes arbitrary file to OS filesystem
-    │
-    ▼
-RCE achieved (e.g., write to OS autostart directory, overwrite binaries, etc.)
+RCE achieved (write to autostart, overwrite binaries, exfiltrate data)
 ```
-
-## Reproduction
-
-### Prerequisites
-
-- NextChat Desktop (Tauri build) — any version up to 2.16.1
-  - Download from: https://github.com/ChatGPTNextWeb/ChatGPT-Next-Web/releases
-- Python 3 (for the exploit server)
-- Attacker and victim on the same network (or attacker server reachable)
-
-### Step 1: Verify vulnerability conditions
-
-```bash
-bash poc/verify_vuln.sh .
-```
-
-All 6 conditions should show `[VULN]`.
-
-### Step 2: Start the exploit server
-
-```bash
-# Stage 1 (default): Write proof file
-python3 poc/exploit_server.py --port 8888
-
-# Stage 2: Read /etc/hosts and exfiltrate to attacker
-python3 poc/exploit_server.py --port 8888 --payload stage2
-
-# Stage 3: Write Linux autostart persistence
-python3 poc/exploit_server.py --port 8888 --payload stage3
-```
-
-### Step 3: Trigger in NextChat Desktop
-
-1. Open the NextChat Desktop application (Tauri build)
-2. Navigate to **Settings → Plugins**
-3. Click **+** to create a new plugin
-4. In the **"Load from URL"** field, enter:
-   ```
-   http://<attacker-ip>:8888/plugin.yaml
-   ```
-5. Click the **Load** button (reload icon)
-
-### Step 4: Verify exploitation
-
-**Stage 1 (file write):**
-- A red banner appears in the app: `[PoC] RCE: Wrote /tmp/nextchat-poc.txt`
-- File created at `/tmp/nextchat-poc.txt` (Linux/macOS) or `C:\nextchat-poc.txt` (Windows)
-
-**Stage 2 (exfiltration):**
-- The exploit server logs the contents of `/etc/hosts` (or Windows `hosts` file)
-- Data is sent via Tauri HTTP API (bypasses browser CORS)
-
-**Stage 3 (persistence):**
-- File written to `~/.config/autostart/nextchat-poc.desktop`
-- On next login, the autostart entry executes (shows a notification for PoC)
 
 ## Payload Stages
 
-### Stage 1: Arbitrary File Write (`stage1_rce_file_write.yaml`)
-Writes a proof-of-concept text file to the filesystem. Demonstrates that the
-attacker can create files anywhere the Tauri process has permissions.
-
-### Stage 2: Data Exfiltration (`stage2_exfiltrate.yaml`)
-Reads a local file using `window.__TAURI__.fs.readTextFile()` and sends it to
-the attacker's server using `window.__TAURI__.http.fetch()`, which bypasses
-browser CORS restrictions entirely.
-
-### Stage 3: OS Persistence (`stage3_persist_linux.yaml`)
-Writes a `.desktop` file to the Linux autostart directory, achieving code
-execution on every user login. Equivalent attacks exist for:
-- **macOS:** `~/Library/LaunchAgents/` (LaunchAgent plist)
-- **Windows:** `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`
+| Stage | File | What it does |
+|-------|------|-------------|
+| **1** (default) | `stage1_rce_file_write.yaml` | Writes proof file to `/tmp/nextchat-poc.txt` or `C:\nextchat-poc.txt` |
+| **2** | `stage2_exfiltrate.yaml` | Reads `/etc/hosts` (or Windows hosts), exfiltrates to attacker via Tauri HTTP (bypasses CORS) |
+| **3** | `stage3_persist_linux.yaml` | Writes `.desktop` autostart entry on Linux for login persistence |
 
 ## Impact
 
-- **Confidentiality (HIGH):** Read any file accessible to the user
-- **Integrity (HIGH):** Write/overwrite any file accessible to the user
-- **Availability (HIGH):** Delete critical files, corrupt system state
-- **Scope Change (YES):** WebView sandbox → full OS filesystem
+| Metric | Rating | Evidence |
+|--------|--------|----------|
+| **Confidentiality** | HIGH | `fs.readTextFile` reads any user-accessible file; `http.fetch` exfiltrates without CORS |
+| **Integrity** | HIGH | `fs.writeTextFile`/`writeBinaryFile` writes anywhere (autostart dirs, binaries, configs) |
+| **Availability** | HIGH | `fs.all: true` enables `removeFile`/`removeDir` — attacker can delete system files |
+| **Scope Change** | YES | Crosses from WebView sandbox into host OS filesystem |
 
-## Tauri APIs Available to Attacker
-
-Given the current `tauri.conf.json` allowlist:
+## Tauri APIs Exposed to Attacker
 
 | API | Config | Capability |
 |-----|--------|------------|
 | `fs` | `all: true`, no scope | Read, write, delete any file |
-| `http` | `all: true`, scope `*` | HTTP requests to any host (bypasses CORS) |
-| `shell` | `open: true` | Open URLs in default browser (phishing) |
-| `dialog` | `all: true` | Show native dialogs (social engineering) |
-| `clipboard` | `all: true` | Read/write clipboard content |
-| `notification` | `all: true` | Show OS notifications (social engineering) |
+| `http` | `all: true`, scope `*` | HTTP to any host (bypasses CORS) |
+| `shell` | `open: true` | Open URLs in default browser |
+| `dialog` | `all: true` | Show native dialogs |
+| `clipboard` | `all: true` | Read/write clipboard |
+| `notification` | `all: true` | Show OS notifications |
 
 ## Recommended Fixes
 
-1. **Sanitize plugin content before rendering:**
-   ```tsx
-   import DOMPurify from 'dompurify';
-   // ...
-   dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(editingPlugin.content) }}
-   ```
-   Or better, use `textContent` instead of `innerHTML`:
+1. **Replace innerHTML with textContent:**
    ```tsx
    <code ref={el => { if (el) el.textContent = editingPlugin.content; }} />
    ```
 
-2. **Enable Content Security Policy in Tauri:**
+2. **Enable CSP in Tauri:**
    ```json
-   "security": {
-     "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
-   }
+   "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'"
    ```
 
 3. **Restrict filesystem scope:**
    ```json
-   "fs": {
-     "all": true,
-     "scope": ["$APPDATA/*", "$RESOURCE/*"]
-   }
+   "fs": { "all": true, "scope": ["$APPDATA/*", "$RESOURCE/*"] }
    ```
 
-4. **Disable withGlobalTauri in production:**
+4. **Disable `withGlobalTauri` in production:**
    ```json
    "withGlobalTauri": false
    ```
-
-5. **Validate plugin schemas before storage:**
-   Parse the content as YAML/JSON and validate it against the OpenAPI spec
-   schema before storing. Reject content with HTML tags.
 
 ## Files
 
 ```
 poc/
 ├── exploit_server.py                  # HTTP server with CORS + exfil logging
-├── verify_vuln.sh                     # Checks vulnerability conditions in source
+├── verify_vuln.sh                     # Checks 6 vuln conditions in source
 ├── payloads/
-│   ├── stage1_rce_file_write.yaml     # Proof file write
+│   ├── stage1_rce_file_write.yaml     # Proof file write (default)
 │   ├── stage2_exfiltrate.yaml         # Read file + exfiltrate
 │   └── stage3_persist_linux.yaml      # Autostart persistence (Linux)
+├── build-desktop.sh                   # Build helper (bash) — only if building from source
+├── build-desktop.ps1                  # Build helper (PowerShell) — only if building from source
 └── README.md                          # This file
 ```
-
-## Timeline
-
-- **2024-XX-XX:** Vulnerability discovered
-- **2024-XX-XX:** PoC developed and verified
-- **2024-XX-XX:** Vendor notified
-- **2024-XX-XX:** CVE assigned (pending)
