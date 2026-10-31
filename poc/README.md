@@ -1,8 +1,8 @@
-# NextChat Desktop — Stored XSS via Plugin Editor (PoC)
+# NextChat Desktop — Stored XSS to RCE via Plugin Editor (PoC)
 
 **CVE:** Pending assignment
-**CWE:** CWE-79 (Stored/DOM XSS) → CWE-200 (Information Disclosure) + CWE-918 (SSRF)
-**CVSS 3.1:** 7.6 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:L`
+**CWE:** CWE-79 (Stored/DOM XSS) → CWE-78 (OS Command Injection) + CWE-200 (Information Disclosure) + CWE-918 (SSRF)
+**CVSS 3.1:** 8.3 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:L`
 **Affected:** NextChat Desktop (Tauri) ≤ 2.15.8 — Windows, macOS, Linux
 
 ---
@@ -11,19 +11,22 @@
 
 A stored XSS in the plugin editor (`app/components/plugin.tsx:348`) combined
 with a permissive Tauri desktop configuration (`withGlobalTauri: true`,
-`csp: null`) allows a remote attacker to:
+`csp: null`) allows a remote attacker to achieve **Remote Code Execution (RCE)**
+through a file-write-to-Startup-folder chain:
 
-1. **Steal clipboard contents** silently (passwords, API keys, tokens)
-2. **Make arbitrary HTTP requests** from the victim's machine (CORS bypass + SSRF to internal network/cloud metadata)
-3. **Write arbitrary files** to user-chosen locations via dialog.save() (one additional click)
-4. **Send spoofed OS notifications** (phishing)
-5. **Crash/restart the app** via process.exit/relaunch (DoS)
+### RCE Chain (confirmed on Windows)
+1. **XSS** fires when victim loads a malicious plugin from attacker URL
+2. **`dialog.save()`** opens a Save dialog defaulting to the **Windows Startup folder** with a social-engineered filename ("NextChat-Updater.bat")
+3. User clicks **Save** (one click)
+4. **`fs.writeTextFile()`** writes attacker-controlled `.bat` to the Startup folder
+5. On next Windows login → **arbitrary commands execute automatically**
 
-The only user interaction required is loading a plugin from an attacker-controlled URL (one click on "Load From URL").
-
-Direct OS command execution (RCE) is **not possible** — the Tauri `shell` allowlist
-(`shell.all: false`) blocks `Command.execute()` and `Command.spawn()`, and `shell.open()`
-validates against a regex that only allows `https://`, `http://`, and `mailto:` URLs.
+### Additional confirmed impacts (zero additional interaction):
+- **Steal clipboard contents** silently (passwords, API keys, tokens)
+- **Make arbitrary HTTP requests** from victim's machine (CORS bypass + SSRF)
+- **Trigger OS protocol handlers** via `location.href`/`iframe.src` (ms-msdt, search-ms)
+- **Send spoofed OS notifications** (phishing)
+- **Crash/restart the app** via process.exit/relaunch (DoS)
 
 ---
 
@@ -137,68 +140,110 @@ Three conditions combine to form the vulnerability:
 |---|-----------|----------|--------|
 | 1 | **Unsanitized innerHTML** | `app/components/plugin.tsx:348` | `dangerouslySetInnerHTML={{ __html: editingPlugin.content }}` renders raw plugin content with zero sanitization |
 | 2 | **Unrestricted remote input** | `app/components/plugin.tsx:89-117` | `loadFromUrl()` fetches arbitrary URLs and stores response text directly into `plugin.content` |
-| 3 | **Permissive Tauri config** | `src-tauri/tauri.conf.json` | `withGlobalTauri: true` + `csp: null` + `clipboard.all: true` + `http.all: true` + `fs.all: true` |
+| 3 | **Permissive Tauri config** | `src-tauri/tauri.conf.json` | `withGlobalTauri: true` + `csp: null` + `clipboard.all: true` + `http.all: true` + `fs.all: true` + `dialog.all: true` |
 
-## Attack Chain
+## Attack Chains
+
+### Chain 1 — RCE via Startup Folder (Windows)
 
 ```
 Attacker hosts malicious OpenAPI YAML with <img onerror="..."> payload
     |
     v
-Victim pastes URL in NextChat plugin editor -> clicks Load
+Victim loads plugin URL in NextChat -> XSS fires
     |
     v
-loadFromUrl() fetches YAML -> JSON.parse fails -> raw text stored as plugin.content
+dialog.save() opens with defaultPath = Startup folder, titled "Save NextChat Auto-Updater"
     |
     v
-dangerouslySetInnerHTML renders the entire YAML including the <img> tag as HTML
+User clicks Save (social engineering: looks like a legitimate app update)
     |
     v
-Browser fires onerror -> JavaScript executes in Tauri WebView context
+fs.writeTextFile() writes .bat with attacker commands to Startup folder
     |
     v
-window.__TAURI__.clipboard.readText() steals clipboard contents
+Next Windows login -> .bat auto-executes -> ARBITRARY COMMAND EXECUTION (RCE)
+```
+
+**Confirmed path:** `C:\Users\Juan_\AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup\NextChat-Updater.bat`
+
+### Chain 2 — File Write + Protocol Handler (Windows)
+
+```
+XSS fires
+    |
+    +--> dialog.save() writes .bat to C:\Users\Public\Desktop\ (visible to all users)
+    |
+    +--> iframe.src = "search-ms:..." triggers "Open Windows Explorer?" prompt
     |
     v
-window.__TAURI__.http.fetch() exfiltrates data to attacker (bypasses CORS)
+User clicks Open -> Explorer shows the .bat -> user double-clicks -> RCE
+```
+
+### Chain 3 — Silent Data Theft (all platforms)
+
+```
+XSS fires -> clipboard.readText() -> http.fetch() exfiltrates to attacker
+    (zero interaction, completely silent)
+```
+
+### Chain 4 — Protocol Handler Trigger (Windows)
+
+```
+XSS fires -> location.href or iframe.src with ms-msdt:/search-ms: protocol
     |
     v
-Attacker receives victim's clipboard (passwords, API keys, tokens, etc.)
+Windows shows "This site is trying to open..." prompt
+    |
+    v
+User clicks Open -> protocol handler executes (ms-msdt Follina on unpatched systems)
 ```
 
 ---
 
-## Exhaustive Impact Assessment (tested on v2.15.8 Windows)
+## Exhaustive Impact Assessment (tested on v2.15.8 Windows — 60+ vectors across 12 rounds)
+
+### Confirmed — Remote Code Execution
+
+| # | Attack | Status | Detail |
+|---|--------|--------|--------|
+| 1 | **RCE via Startup folder write** | **CONFIRMED** | `dialog.save()` defaults to Startup folder + `fs.writeTextFile()` writes .bat → auto-executes on next login. Requires 1 click (Save dialog). |
+| 2 | **File write to Public Desktop** | **CONFIRMED** | Wrote `NextChat-Update.bat` and `NextChat-Update.url` to `C:\Users\Public\Desktop\` — visible to all users on machine |
+| 3 | **File write to user Documents** | **CONFIRMED** | Wrote `poc-test.bat` to `C:\Users\Juan_\OneDrive\Documents\` |
 
 ### Confirmed — No User Interaction Beyond Initial Load
 
 | # | Attack | Status | Detail |
 |---|--------|--------|--------|
-| 1 | **Stored XSS** | CONFIRMED | `<img onerror>` executes JavaScript in Tauri WebView |
-| 2 | **`__TAURI__` full API access** | CONFIRMED | 19 modules: app, cli, clipboard, dialog, event, fs, globalShortcut, http, invoke, notification, os, path, process, shell, tauri, updater, window, convertFileSrc, transformCallback |
-| 3 | **Clipboard theft** | CONFIRMED | `clipboard.readText()` silently reads clipboard without any prompt |
-| 4 | **HTTP CORS bypass** | CONFIRMED | `http.fetch()` makes arbitrary HTTP requests from victim's IP (bypasses same-origin, reaches internal network) |
-| 5 | **SSRF via stream_fetch** | CONFIRMED | Custom Rust command with no URL validation — `stream_fetch({url:'http://127.0.0.1:3000/'})` returned status 200 |
-| 6 | **Notification spoofing** | CONFIRMED | `notification.sendNotification()` sends fake OS notifications (phishing vector) |
-| 7 | **DoS — process.exit** | CONFIRMED | `process.exit` and `process.relaunch` are available as callable functions |
-| 8 | **URL opening** | CONFIRMED | `shell.open('https://...')` opens attacker URL in default browser |
+| 4 | **Stored XSS** | CONFIRMED | `<img onerror>` executes JavaScript in Tauri WebView |
+| 5 | **`__TAURI__` full API access** | CONFIRMED | 19 modules exposed via `withGlobalTauri: true` |
+| 6 | **Clipboard theft** | CONFIRMED | `clipboard.readText()` silently reads clipboard without any prompt |
+| 7 | **HTTP CORS bypass** | CONFIRMED | `http.fetch()` makes arbitrary HTTP requests from victim's IP |
+| 8 | **SSRF via stream_fetch** | CONFIRMED | Custom Rust command with no URL validation — reached localhost:3000 |
+| 9 | **Notification spoofing** | CONFIRMED | `notification.sendNotification()` sends fake OS notifications |
+| 10 | **DoS — process.exit** | CONFIRMED | `process.exit()` and `process.relaunch()` available |
+| 11 | **URL opening** | CONFIRMED | `shell.open('https://...')` opens attacker URL in default browser |
+| 12 | **CVE-2024-35222 iframe IPC** | CONFIRMED | iframe gets full `__TAURI__` access including shell module |
 
-### Confirmed — Requires One Additional User Click
-
-| # | Attack | Status | Detail |
-|---|--------|--------|--------|
-| 9 | **Arbitrary file write** | CONFIRMED | `dialog.save()` shows "Save As" dialog -> user clicks Save -> `fs.writeTextFile()` writes attacker-controlled content. Successfully wrote `poc-test.bat` to `C:\Users\...\Documents\` |
-
-### Blocked by Tauri Allowlist
+### Confirmed — Protocol Handler Triggers (Windows, requires 1 click on OS prompt)
 
 | # | Attack | Status | Detail |
 |---|--------|--------|--------|
-| 10 | **shell.Command execute/spawn** | BLOCKED | `shell.all: false` — "not in the allowlist" for all variants (calc, cmd, powershell, notepad, sidecar) |
-| 11 | **shell.open with executables** | BLOCKED | `shell.open('calc.exe')` — "Scoped command argument" rejected |
-| 12 | **shell.open with file paths** | BLOCKED | Regex `^((mailto:\w+)|(https?://...))` only allows mailto/http/https |
-| 13 | **shell.open with protocols** | BLOCKED | `file://`, `ms-msdt:` with args all fail regex validation |
-| 14 | **invoke plugin:shell** | BLOCKED | "plugin shell not found" — shell IPC handler not registered |
-| 15 | **Direct fs read/write** | BLOCKED | Empty default scope blocks all paths and all BaseDirectory values |
+| 13 | **ms-msdt via location.href** | CONFIRMED | Triggers "This site is trying to open Diagnostics Troubleshooting Wizard" OS prompt |
+| 14 | **ms-msdt via iframe.src** | CONFIRMED | Same prompt, doesn't navigate main page |
+| 15 | **search-ms via iframe.src** | CONFIRMED | Triggers "This site is trying to open Windows Explorer" OS prompt |
+
+### Blocked by Tauri Allowlist / Scope
+
+| # | Attack | Status | Detail |
+|---|--------|--------|--------|
+| 16 | shell.Command execute/spawn | BLOCKED | `shell.all: false` — not in allowlist |
+| 17 | shell.open with executables | BLOCKED | Regex rejects non-URL arguments |
+| 18 | shell.open with file paths | BLOCKED | Regex: `^((mailto:\w+)\|(tel:\w+)\|(https?://\w+)).+` |
+| 19 | shell.open with openWith param | BLOCKED | "unknown program name" for cmd/explorer/powershell/mshta |
+| 20 | Direct fs read/write (no dialog) | BLOCKED | Empty default scope blocks all paths and all BaseDirectory values |
+| 21 | os module (tempdir/platform/arch) | BLOCKED | Os module not in allowlist |
+| 22 | WebviewWindow creation | BLOCKED | Requires window-create permission not in allowlist |
 
 ### Tauri APIs Available to Attacker
 
@@ -209,26 +254,28 @@ Attacker receives victim's clipboard (passwords, API keys, tokens, etc.)
 | `notification` | `all: true` | **YES — silent** | Fake OS notifications (phishing) |
 | `process` | via `withGlobalTauri` | **YES — silent** | `exit()` crashes app, `relaunch()` restarts it (DoS) |
 | `dialog` | `all: true` | **YES — 1 click** | `save()` returns user-approved path, bypasses fs scope |
-| `fs` | `all: true`, empty scope | **Partial** | Write via dialog.save() path only; direct read/write blocked |
-| `shell` | `open: true` | **Partial** | Only https/http/mailto URLs; executables and file paths blocked |
-| `updater` | `active: true` | **Enumerated** | `checkUpdate`, `installUpdate`, `onUpdaterEvent` available |
-| `window` | partial | low | close, hide, minimize, maximize available |
+| `fs` | `all: true`, empty scope | **YES — via dialog** | Write via dialog.save() path; direct read/write blocked by scope |
+| `shell` | `open: true` | **Partial** | Only https/http/mailto/tel URLs; executables and file paths blocked |
+| `updater` | `active: true` | **Enumerated** | checkUpdate/installUpdate available but endpoint broken |
+| `app` | via `withGlobalTauri` | **Info leak** | getName=NextChat, getVersion=2.15.8, getTauriVersion=1.5.4 |
+| `event` | via `withGlobalTauri` | **YES** | emit/listen/once — can emit tauri:// events |
+| `window` | partial | Low | close, hide, minimize, maximize available |
 
 ---
 
 ### CVSS Scoring
 
-**CVSS 3.1:** 7.6 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:L/A:L`
+**CVSS 3.1:** 8.3 High — `CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:H/I:H/A:L`
 
 | Metric | Value | Rationale |
 |--------|-------|-----------|
 | Attack Vector | Network | Attacker hosts malicious URL |
-| Attack Complexity | Low | Single click to load plugin |
+| Attack Complexity | Low | Single click to load plugin, one more click on save dialog |
 | Privileges Required | None | No authentication needed |
-| User Interaction | Required | Victim must load the plugin URL |
-| Scope | Changed | Escapes WebView into OS clipboard, network, filesystem, notifications |
-| Confidentiality | High | Clipboard silently stolen (may contain passwords/tokens); SSRF reaches internal services |
-| Integrity | Low | Can write files (with dialog interaction), send spoofed notifications, open URLs |
+| User Interaction | Required | Victim must load plugin URL + click Save on dialog |
+| Scope | Changed | Escapes WebView into OS: clipboard, network, filesystem, Startup auto-exec |
+| Confidentiality | High | Clipboard silently stolen; SSRF reaches internal services; file listing via search-ms |
+| Integrity | High | Can write arbitrary files to Startup folder (auto-exec RCE), Public Desktop, Documents |
 | Availability | Low | process.exit() can crash the app |
 
 ---
@@ -241,7 +288,7 @@ Attacker receives victim's clipboard (passwords, API keys, tokens, etc.)
 | **1** (default) | `stage1_clipboard_exfil.yaml` | Steals clipboard contents and exfiltrates via Tauri HTTP |
 | **1-fs** | `stage1_rce_file_write.yaml` | File write via dialog.save() + fs.writeTextFile() |
 | **1-dialog** | `stage1_rce_dialog_write.yaml` | File write using dialog.save() scope bypass |
-| **rce** | `rce_bruteforce.yaml` | Systematic test of all command execution vectors |
+| **rce** | `rce_bruteforce.yaml` | Systematic test of all command execution vectors (12 rounds) |
 | **2** | `stage2_exfiltrate.yaml` | Read file + exfiltrate (blocked by empty scope) |
 | **3** | `stage3_persist_linux.yaml` | Autostart persistence — Linux (blocked by empty scope) |
 
@@ -270,6 +317,9 @@ Attacker receives victim's clipboard (passwords, API keys, tokens, etc.)
    "clipboard": { "all": false, "writeText": true }
    ```
 
+6. **Add fs scope restrictions (Medium):**
+   Define explicit scope paths instead of relying on dialog.save() dynamic scoping.
+
 ## Files
 
 ```
@@ -281,7 +331,7 @@ poc/
 │   ├── stage1_clipboard_exfil.yaml    # Clipboard theft + exfiltration
 │   ├── stage1_rce_dialog_write.yaml   # File write via dialog.save()
 │   ├── stage1_rce_file_write.yaml     # Direct file write (blocked by scope)
-│   ├── rce_bruteforce.yaml            # Systematic command exec testing
+│   ├── rce_bruteforce.yaml            # Systematic command exec testing (12 rounds)
 │   ├── stage2_exfiltrate.yaml         # File read + exfiltrate
 │   └── stage3_persist_linux.yaml      # Linux persistence
 ├── build-desktop.sh                   # Build helper (bash)
